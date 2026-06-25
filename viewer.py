@@ -287,8 +287,12 @@ def build_ui(root):
     sidebar_visible = True
     sidebar_width = max(280, min(340, root.winfo_screenwidth() // 6))
 
-    # 顶部标题栏
-    header_frame = tk.Frame(root, bg=CARD_HEADER, height=48)
+    # 顶部标题栏（自动缩进/隐藏）
+    header_container = tk.Frame(root, bg=BG_COLOR, height=48)
+    header_container.pack(side=tk.TOP, fill=tk.X)
+    header_container.pack_propagate(False)
+
+    header_frame = tk.Frame(header_container, bg=CARD_HEADER, height=48)
     header_frame.pack(side=tk.TOP, fill=tk.X)
     header_frame.pack_propagate(False)
 
@@ -304,6 +308,38 @@ def build_ui(root):
     conn_count_label = tk.Label(header_frame, text="连接数: 0", font=small_font,
                                 bg=CARD_HEADER, fg=TEXT_SECONDARY)
     conn_count_label.pack(side=tk.RIGHT, padx=15)
+
+    # 顶部触发条（顶栏隐藏后鼠标移入可恢复）
+    trigger_strip = tk.Frame(root, bg=ACCENT, height=4, cursor="sb_v_double_arrow")
+    trigger_strip.pack(side=tk.TOP, fill=tk.X)
+    trigger_strip.pack_forget()  # 初始隐藏
+
+    header_hide_after = None
+
+    def show_header():
+        nonlocal header_hide_after
+        if header_hide_after:
+            header_container.after_cancel(header_hide_after)
+            header_hide_after = None
+        header_frame.pack(side=tk.TOP, fill=tk.X)
+        trigger_strip.pack_forget()
+        header_container.config(height=48)
+
+    def hide_header():
+        nonlocal header_hide_after
+        header_frame.pack_forget()
+        trigger_strip.pack(side=tk.TOP, fill=tk.X, before=main_paned)
+        header_container.config(height=4)
+
+    def schedule_hide(event=None):
+        nonlocal header_hide_after
+        if header_hide_after:
+            header_container.after_cancel(header_hide_after)
+        header_hide_after = header_container.after(1200, hide_header)
+
+    header_frame.bind("<Leave>", schedule_hide)
+    header_container.bind("<Enter>", show_header)
+    trigger_strip.bind("<Enter>", show_header)
 
     # 主区域：可拖动分隔条 + 可隐藏左侧栏
     main_paned = tk.PanedWindow(root, orient=tk.HORIZONTAL, bg=BG_COLOR,
