@@ -276,7 +276,7 @@ def build_ui(root):
 
     root.title("摄像头查看端")
     root.geometry("1450x900")
-    root.minsize(1200, 700)
+    root.minsize(900, 600)
     root.configure(bg=BG_COLOR)
     root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
 
@@ -284,16 +284,42 @@ def build_ui(root):
     small_font = tkfont.Font(family="Microsoft YaHei", size=9)
     btn_font = ("Microsoft YaHei", 10)
 
-    # 响应式：左侧栏宽度随窗口变化（最小 280，最大 340）
+    sidebar_visible = True
     sidebar_width = max(280, min(340, root.winfo_screenwidth() // 6))
 
-    # 主布局
-    left_scroll = ScrollableFrame(root, width=sidebar_width, bg=BG_COLOR)
-    left_scroll.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=12)
+    # 顶部标题栏
+    header_frame = tk.Frame(root, bg=CARD_HEADER, height=48)
+    header_frame.pack(side=tk.TOP, fill=tk.X)
+    header_frame.pack_propagate(False)
+
+    menu_btn = tk.Label(header_frame, text="☰", bg=CARD_HEADER, fg=TEXT_COLOR,
+                        font=("Microsoft YaHei", 14), cursor="hand2", padx=15)
+    menu_btn.pack(side=tk.LEFT)
+    menu_btn.bind("<Enter>", lambda e: menu_btn.config(fg=ACCENT))
+    menu_btn.bind("<Leave>", lambda e: menu_btn.config(fg=TEXT_COLOR))
+
+    tk.Label(header_frame, text="摄像头查看端", font=title_font,
+             bg=CARD_HEADER, fg=TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 20))
+
+    conn_count_label = tk.Label(header_frame, text="连接数: 0", font=small_font,
+                                bg=CARD_HEADER, fg=TEXT_SECONDARY)
+    conn_count_label.pack(side=tk.RIGHT, padx=15)
+
+    # 主区域：可拖动分隔条 + 可隐藏左侧栏
+    main_paned = tk.PanedWindow(root, orient=tk.HORIZONTAL, bg=BG_COLOR,
+                                sashrelief=tk.FLAT, sashwidth=6, bd=0)
+    main_paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    left_wrapper = tk.Frame(main_paned, bg=BG_COLOR, width=sidebar_width)
+    left_wrapper.pack_propagate(False)
+    left_scroll = ScrollableFrame(left_wrapper, width=sidebar_width - 12, bg=BG_COLOR)
+    left_scroll.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
     left_frame = left_scroll.frame
 
-    right_frame = tk.Frame(root, bg=BG_COLOR)
-    right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12), pady=12)
+    right_frame = tk.Frame(main_paned, bg=BG_COLOR)
+
+    main_paned.add(left_wrapper, minsize=240)
+    main_paned.add(right_frame, minsize=400)
 
     # 左侧标题
     tk.Label(left_frame, text="摄像头查看端", font=title_font,
@@ -371,13 +397,30 @@ def build_ui(root):
 
     # 右侧视频区
     video_container = tk.Frame(right_frame, bg=BG_COLOR)
-    video_container.pack(fill=tk.BOTH, expand=True)
+    video_container.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 0))
 
     status_var = tk.StringVar(value="就绪")
     status_bar = tk.Label(right_frame, textvariable=status_var, anchor=tk.W,
                           bg=CARD_BG, fg=TEXT_SECONDARY, font=small_font,
                           padx=12, pady=6)
-    status_bar.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+    status_bar.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 12), padx=12)
+
+    def toggle_sidebar(event=None):
+        nonlocal sidebar_visible
+        if sidebar_visible:
+            main_paned.forget(left_wrapper)
+            sidebar_visible = False
+        else:
+            main_paned.add(left_wrapper, minsize=240)
+            main_paned.paneconfig(left_wrapper, width=sidebar_width)
+            sidebar_visible = True
+        root.after(100, rearrange_videos)
+
+    menu_btn.bind("<Button-1>", toggle_sidebar)
+
+    def update_conn_count():
+        with connections_lock:
+            conn_count_label.config(text=f"连接数: {len(connections)}")
 
     def refresh_list():
         listbox.delete(0, tk.END)
@@ -386,6 +429,7 @@ def build_ui(root):
             for info in items:
                 connected = "● " if info["ip"] in connections else "  "
                 listbox.insert(tk.END, f"{connected}{info['hostname']} ({info['ip']})")
+        update_conn_count()
 
     def get_selected_ip():
         sel = listbox.curselection()
