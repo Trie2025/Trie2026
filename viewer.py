@@ -276,7 +276,7 @@ def build_ui(root):
 
     root.title("摄像头查看端")
     root.geometry("1450x900")
-    root.minsize(900, 600)
+    root.minsize(90, 60)
     root.configure(bg=BG_COLOR)
     root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
 
@@ -318,8 +318,8 @@ def build_ui(root):
 
     right_frame = tk.Frame(main_paned, bg=BG_COLOR)
 
-    main_paned.add(left_wrapper, minsize=240)
-    main_paned.add(right_frame, minsize=400)
+    main_paned.add(left_wrapper, minsize=10)
+    main_paned.add(right_frame, minsize=10)
 
     # 左侧标题
     tk.Label(left_frame, text="摄像头查看端", font=title_font,
