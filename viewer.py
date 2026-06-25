@@ -5,6 +5,7 @@
 - 可调节每路画面的清晰度（JPEG 质量）和分辨率
 - 可正常断开某路连接
 - 双击画面全屏、窗口大小自动适应、画面铺满窗格
+- 左侧栏可滚动、圆角按钮、响应式布局
 """
 
 import json
@@ -31,13 +32,15 @@ CARD_BG = "#1e1e1e"
 CARD_HEADER = "#2a2a2a"
 ACCENT = "#4A90D9"
 ACCENT_HOVER = "#357ABD"
+DANGER = "#c0392b"
+DANGER_HOVER = "#e74c3c"
 TEXT_COLOR = "#f0f0f0"
 TEXT_SECONDARY = "#999999"
 BORDER_COLOR = "#333333"
 
-providers = {}          # ip -> {"ip", "port", "hostname", "last_seen"}
+providers = {}
 providers_lock = threading.Lock()
-connections = {}        # ip -> 连接信息字典
+connections = {}
 connections_lock = threading.Lock()
 ui_queue = queue.Queue()
 
@@ -158,7 +161,6 @@ def update_frame(video_label, conn_info):
                 video_label.update_idletasks()
                 w, h = video_label.winfo_width(), video_label.winfo_height()
                 if w > 1 and h > 1:
-                    # 拉伸铺满窗格
                     pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
                 tk_img = ImageTk.PhotoImage(pil_img)
                 video_label.configure(image=tk_img)
@@ -180,69 +182,152 @@ def on_closing(root):
     root.destroy()
 
 
-def create_hover_button(parent, text, command, width=10, bg=ACCENT, hover=ACCENT_HOVER):
-    btn = tk.Button(parent, text=text, command=command, width=width,
-                    bg=bg, fg="white", activebackground=hover,
-                    activeforeground="white", bd=0, cursor="hand2",
-                    font=("Microsoft YaHei", 10))
-    btn.bind("<Enter>", lambda e: btn.config(bg=hover))
-    btn.bind("<Leave>", lambda e: btn.config(bg=bg))
-    return btn
+class RoundedButton:
+    """使用 Canvas 绘制的圆角按钮。"""
+    def __init__(self, parent, text, command=None, width=120, height=34,
+                 bg=ACCENT, hover=ACCENT_HOVER, fg="white", font=("Microsoft YaHei", 10)):
+        self.command = command
+        self.bg = bg
+        self.hover = hover
+        self.fg = fg
+        self.canvas = tk.Canvas(parent, width=width, height=height,
+                                bg=parent["bg"], highlightthickness=0, cursor="hand2")
+        self.radius = height // 2
+        self._draw(bg)
+        self.text_id = self.canvas.create_text(width // 2, height // 2, text=text,
+                                               fill=fg, font=font)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+        self.canvas.bind("<Button-1>", self._on_click)
+
+    def _draw(self, color):
+        self.canvas.delete("bg")
+        r = self.radius
+        w = self.canvas.winfo_reqwidth()
+        h = self.canvas.winfo_reqheight()
+        self.canvas.create_oval(0, 0, r * 2, r * 2, fill=color, outline=color, tags="bg")
+        self.canvas.create_oval(w - r * 2, 0, w, r * 2, fill=color, outline=color, tags="bg")
+        self.canvas.create_oval(0, h - r * 2, r * 2, h, fill=color, outline=color, tags="bg")
+        self.canvas.create_oval(w - r * 2, h - r * 2, w, h, fill=color, outline=color, tags="bg")
+        self.canvas.create_rectangle(r, 0, w - r, h, fill=color, outline=color, tags="bg")
+        self.canvas.create_rectangle(0, r, w, h - r, fill=color, outline=color, tags="bg")
+        self.canvas.tag_lower("bg")
+
+    def _on_enter(self, event):
+        self._draw(self.hover)
+        if hasattr(self, 'text_id'):
+            self.canvas.tag_raise(self.text_id)
+
+    def _on_leave(self, event):
+        self._draw(self.bg)
+        if hasattr(self, 'text_id'):
+            self.canvas.tag_raise(self.text_id)
+
+    def _on_click(self, event):
+        if self.command:
+            self.command()
+
+    def pack(self, **kwargs):
+        self.canvas.pack(**kwargs)
+
+
+class ScrollableFrame:
+    """可滚动框架。"""
+    def __init__(self, parent, width, bg):
+        self.container = tk.Frame(parent, width=width, bg=bg)
+        self.container.pack_propagate(False)
+
+        self.canvas = tk.Canvas(self.container, bg=bg, highlightthickness=0,
+                                width=width - 12)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.scrollbar = tk.Scrollbar(self.container, orient=tk.VERTICAL,
+                                      command=self.canvas.yview, bg=bg,
+                                      troughcolor=bg, activebackground=ACCENT)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.frame = tk.Frame(self.canvas, bg=bg, width=width - 12)
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.frame,
+                                                       anchor=tk.NW, width=width - 12)
+
+        self.frame.bind("<Configure>", self._on_frame_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _on_frame_configure(self, event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+
+    def _on_mousewheel(self, event):
+        if self.canvas.winfo_containing(event.x_root, event.y_root) == self.canvas:
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def pack(self, **kwargs):
+        self.container.pack(**kwargs)
+
 
 
 def build_ui(root):
     global resize_after_id
 
     root.title("摄像头查看端")
-    root.geometry("1400x900")
-    root.minsize(1100, 700)
+    root.geometry("1450x900")
+    root.minsize(1200, 700)
     root.configure(bg=BG_COLOR)
     root.protocol("WM_DELETE_WINDOW", lambda: on_closing(root))
 
-    title_font = tkfont.Font(family="Microsoft YaHei", size=13, weight="bold")
+    title_font = tkfont.Font(family="Microsoft YaHei", size=14, weight="bold")
     small_font = tkfont.Font(family="Microsoft YaHei", size=9)
+    btn_font = ("Microsoft YaHei", 10)
+
+    # 响应式：左侧栏宽度随窗口变化（最小 280，最大 340）
+    sidebar_width = max(280, min(340, root.winfo_screenwidth() // 6))
 
     # 主布局
-    left_frame = tk.Frame(root, width=290, bg=BG_COLOR)
-    left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=15, pady=15)
-    left_frame.pack_propagate(False)
+    left_scroll = ScrollableFrame(root, width=sidebar_width, bg=BG_COLOR)
+    left_scroll.pack(side=tk.LEFT, fill=tk.Y, padx=12, pady=12)
+    left_frame = left_scroll.frame
 
     right_frame = tk.Frame(root, bg=BG_COLOR)
-    right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 15), pady=15)
+    right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 12), pady=12)
 
     # 左侧标题
     tk.Label(left_frame, text="摄像头查看端", font=title_font,
-             bg=BG_COLOR, fg=TEXT_COLOR).pack(anchor=tk.W, pady=(0, 4))
+             bg=BG_COLOR, fg=TEXT_COLOR).pack(anchor=tk.W, pady=(8, 4), padx=8)
     tk.Label(left_frame, text="自动发现同局域网摄像头", font=small_font,
-             bg=BG_COLOR, fg=TEXT_SECONDARY).pack(anchor=tk.W, pady=(0, 18))
+             bg=BG_COLOR, fg=TEXT_SECONDARY).pack(anchor=tk.W, pady=(0, 18), padx=8)
 
-    # 摄像头列表
-    list_card = tk.Frame(left_frame, bg=CARD_BG, bd=1, relief=tk.FLAT)
-    list_card.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+    # 摄像头列表卡片
+    list_card = tk.Frame(left_frame, bg=CARD_BG, bd=0)
+    list_card.pack(fill=tk.X, pady=(0, 12), padx=8)
 
     tk.Label(list_card, text="发现的摄像头", font=("Microsoft YaHei", 10, "bold"),
-             bg=CARD_BG, fg=TEXT_COLOR).pack(anchor=tk.W, padx=12, pady=(12, 8))
+             bg=CARD_BG, fg=TEXT_COLOR).pack(anchor=tk.W, padx=12, pady=(14, 8))
 
-    listbox = tk.Listbox(list_card, height=10, bd=0, highlightthickness=0,
+    listbox = tk.Listbox(list_card, height=8, bd=0, highlightthickness=0,
                          bg=CARD_BG, fg=TEXT_COLOR, selectbackground=ACCENT,
                          selectforeground="white", font=("Microsoft YaHei", 10),
                          relief=tk.FLAT)
-    listbox.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 10))
+    listbox.pack(fill=tk.X, padx=12, pady=(0, 10))
 
     btn_frame = tk.Frame(list_card, bg=CARD_BG)
-    btn_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
-    connect_btn = create_hover_button(btn_frame, "连接", None, width=12)
-    connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-    disconnect_btn = create_hover_button(btn_frame, "断开", None, width=12,
-                                         bg="#5a5a5a", hover="#6a6a6a")
-    disconnect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+    btn_frame.pack(fill=tk.X, padx=12, pady=(0, 14))
+    connect_btn = RoundedButton(btn_frame, "连接", None, width=110, height=32, font=btn_font)
+    connect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
+    disconnect_btn = RoundedButton(btn_frame, "断开", None, width=110, height=32,
+                                   bg="#5a5a5a", hover="#6a6a6a", font=btn_font)
+    disconnect_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 0))
 
-    # 控制面板
-    ctrl_card = tk.Frame(left_frame, bg=CARD_BG, bd=1, relief=tk.FLAT)
-    ctrl_card.pack(fill=tk.X, pady=(0, 12))
+    # 控制面板卡片
+    ctrl_card = tk.Frame(left_frame, bg=CARD_BG, bd=0)
+    ctrl_card.pack(fill=tk.X, pady=(0, 12), padx=8)
 
     tk.Label(ctrl_card, text="画面设置", font=("Microsoft YaHei", 10, "bold"),
-             bg=CARD_BG, fg=TEXT_COLOR).pack(anchor=tk.W, padx=12, pady=(12, 10))
+             bg=CARD_BG, fg=TEXT_COLOR).pack(anchor=tk.W, padx=12, pady=(14, 10))
 
     tk.Label(ctrl_card, text="清晰度 (JPEG 质量)", font=small_font,
              bg=CARD_BG, fg=TEXT_SECONDARY).pack(anchor=tk.W, padx=12)
@@ -251,13 +336,12 @@ def build_ui(root):
     quality_scale = tk.Scale(ctrl_card, from_=10, to=95, orient=tk.HORIZONTAL,
                              variable=quality_var, bg=CARD_BG, fg=TEXT_COLOR,
                              troughcolor=BORDER_COLOR, highlightthickness=0,
-                             bd=0, activebackground=ACCENT, length=230,
-                             showvalue=0)
-    quality_scale.pack(fill=tk.X, padx=8, pady=(0, 4))
+                             bd=0, activebackground=ACCENT, showvalue=0)
+    quality_scale.pack(fill=tk.X, padx=10, pady=(0, 4))
 
     quality_label = tk.Label(ctrl_card, text="70", font=small_font,
                              bg=CARD_BG, fg=TEXT_COLOR)
-    quality_label.pack(anchor=tk.E, padx=12, pady=(0, 10))
+    quality_label.pack(anchor=tk.E, padx=12, pady=(0, 12))
 
     tk.Label(ctrl_card, text="分辨率", font=small_font,
              bg=CARD_BG, fg=TEXT_SECONDARY).pack(anchor=tk.W, padx=12)
@@ -271,19 +355,19 @@ def build_ui(root):
                             activeforeground="white")
     res_menu.pack(fill=tk.X, padx=12, pady=(4, 0))
 
-    apply_btn = create_hover_button(ctrl_card, "应用设置", None, width=22)
-    apply_btn.pack(fill=tk.X, padx=12, pady=(14, 12))
+    apply_btn = RoundedButton(ctrl_card, "应用设置", None, width=220, height=34, font=btn_font)
+    apply_btn.pack(fill=tk.X, padx=12, pady=(16, 14))
 
-    # 全局操作
-    global_card = tk.Frame(left_frame, bg=CARD_BG, bd=1, relief=tk.FLAT)
-    global_card.pack(fill=tk.X)
+    # 全局操作卡片
+    global_card = tk.Frame(left_frame, bg=CARD_BG, bd=0)
+    global_card.pack(fill=tk.X, padx=8)
 
     tk.Label(global_card, text="全局操作", font=("Microsoft YaHei", 10, "bold"),
-             bg=CARD_BG, fg=TEXT_COLOR).pack(anchor=tk.W, padx=12, pady=(12, 10))
+             bg=CARD_BG, fg=TEXT_COLOR).pack(anchor=tk.W, padx=12, pady=(14, 10))
 
-    disconnect_all_btn = create_hover_button(global_card, "断开全部", None, width=22,
-                                              bg="#c0392b", hover="#e74c3c")
-    disconnect_all_btn.pack(fill=tk.X, padx=12, pady=(0, 12))
+    disconnect_all_btn = RoundedButton(global_card, "断开全部", None, width=220, height=34,
+                                        bg=DANGER, hover=DANGER_HOVER, font=btn_font)
+    disconnect_all_btn.pack(fill=tk.X, padx=12, pady=(0, 14))
 
     # 右侧视频区
     video_container = tk.Frame(right_frame, bg=BG_COLOR)
@@ -337,8 +421,7 @@ def build_ui(root):
         t = threading.Thread(target=stream_reader, args=(ip, port, conn_info), daemon=True)
         t.start()
 
-        # 视频卡片
-        card = tk.Frame(video_container, bg=CARD_BG, bd=1, relief=tk.FLAT)
+        card = tk.Frame(video_container, bg=CARD_BG, bd=0)
         card.grid_propagate(False)
 
         header = tk.Frame(card, bg=CARD_HEADER, height=30)
@@ -497,10 +580,10 @@ def build_ui(root):
 
     quality_var.trace_add("write", on_quality_change)
 
-    connect_btn.config(command=connect)
-    disconnect_btn.config(command=disconnect)
-    apply_btn.config(command=apply_settings)
-    disconnect_all_btn.config(command=disconnect_all)
+    connect_btn.command = connect
+    disconnect_btn.command = disconnect
+    apply_btn.command = apply_settings
+    disconnect_all_btn.command = disconnect_all
 
     video_container.bind("<Configure>", on_resize)
     root.bind("<Configure>", on_resize)
