@@ -309,6 +309,23 @@ def build_ui(root):
                                 bg=CARD_HEADER, fg=TEXT_SECONDARY)
     conn_count_label.pack(side=tk.RIGHT, padx=15)
 
+    always_on_top = [False]
+    pin_btn = tk.Label(header_frame, text="置顶", bg=CARD_HEADER, fg=TEXT_SECONDARY,
+                       font=small_font, cursor="hand2", padx=10)
+    pin_btn.pack(side=tk.RIGHT, padx=(0, 10))
+
+    def toggle_always_on_top(event=None):
+        always_on_top[0] = not always_on_top[0]
+        root.attributes("-topmost", always_on_top[0])
+        if always_on_top[0]:
+            pin_btn.config(fg=ACCENT, text="已置顶")
+        else:
+            pin_btn.config(fg=TEXT_SECONDARY, text="置顶")
+
+    pin_btn.bind("<Enter>", lambda e: pin_btn.config(fg=ACCENT if not always_on_top[0] else "white"))
+    pin_btn.bind("<Leave>", lambda e: pin_btn.config(fg=ACCENT if always_on_top[0] else TEXT_SECONDARY))
+    pin_btn.bind("<Button-1>", toggle_always_on_top)
+
     # 顶部触发条（顶栏隐藏后鼠标移入可恢复）
     trigger_strip = tk.Frame(root, bg=ACCENT, height=4, cursor="sb_v_double_arrow")
     trigger_strip.pack(side=tk.TOP, fill=tk.X)
