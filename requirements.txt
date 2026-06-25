@@ -1,5 +1,9 @@
-opencv-python>=4.8.0
-Pillow>=10.0.0
-pystray>=0.19.4
-numpy>=1.24.0
-pyinstaller>=6.0.0
+# Windows 7 兼容版本
+# 请使用 Python 3.8.x（python.org 可下载 3.8.10）
+# Python 3.9+ 和 PyInstaller 6+ 已不支持 Windows 7
+
+opencv-python==4.6.0.66
+Pillow==9.5.0
+pystray==0.19.4
+numpy==1.23.5
+pyinstaller==5.13.2
